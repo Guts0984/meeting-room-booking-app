@@ -17,19 +17,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 1. Start your full Docker stack (Database, Backend, Frontend)
+      # Create backend environment file before Docker Compose
+      - name: Create Backend Environment File
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          mkdir -p backend
+          cat > backend/.env <<EOF
+          PORT=3000
+          JWT_SECRET=${JWT_SECRET}
+          JWT_EXPIRES_IN=15m
+          EOF
+
+      # Start the Docker stack
       - name: Start Docker Stack
         run: docker compose up -d --build
 
-      # 2. Wait for PostgreSQL to be fully healthy
+      # Wait for PostgreSQL to be healthy
       - name: Wait for Database
         run: |
-          until docker inspect --format="{{.State.Health.Status}}" $(docker compose ps -q db) | grep -m 1 "healthy"; do
+          until [ "$(docker compose ps -q db | xargs -r docker inspect --format='{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; do
             echo "Waiting for database..."
             sleep 3
           done
 
-      # 3. Setup Node.js and run Playwright E2E Tests
+      # Setup Node.js and run Playwright E2E tests
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -47,7 +59,7 @@ jobs:
           BASE_URL: http://localhost:5444
         run: npx playwright test
 
-      # 4. Log in to Docker Hub (Only triggers on push to main)
+      # Login to Docker Hub on pushes to main
       - name: Log in to Docker Hub
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
@@ -55,7 +67,7 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
-      # 5. Build and Push Final Images to Docker Hub
+      # Build and push backend image
       - name: Build and Push Backend
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
@@ -64,6 +76,7 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKER_HUB_USERNAME }}/meeting-backend:latest
 
+      # Build and push frontend image
       - name: Build and Push Frontend
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v5
@@ -71,3 +84,12 @@ jobs:
           context: ./frontend
           push: true
           tags: ${{ secrets.DOCKER_HUB_USERNAME }}/meeting-frontend:latest
+
+      # Print logs if a step fails and clean up
+      - name: Docker Logs on Failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop Docker Stack
+        if: always()
+        run: docker compose down -v
