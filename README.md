@@ -25,6 +25,7 @@ Create your `.env` files from the example templates before starting the applicat
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
+Run node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" to generate secret and place it in backend/.env file
 
 > **Security:** Never commit real passwords, API keys, or authentication secrets to GitHub.
 
