@@ -62,10 +62,15 @@ export function BookingFormDialog({
 
   function onSubmit(values: BookingValues) {
     setServerError(null);
+    const payload: BookingValues = {
+      ...values,
+      start: new Date(values.start).toISOString(),
+      end: new Date(values.end).toISOString(),
+    };
     startTransition(async () => {
       const result = booking
-        ? await updateBookingAction(roomId, booking.id, values)
-        : await createBookingAction(roomId, values);
+        ? await updateBookingAction(roomId, booking.id, payload)
+        : await createBookingAction(roomId, payload);
       if (result?.error) {
         setServerError(result.error);
       } else {

@@ -12,6 +12,9 @@ export const createBookingSchema = z
   })
   .refine((data) => data.endTime > data.startTime, {
     message: "endTime must be after startTime",
+  })
+  .refine((data) => data.startTime.getTime() >= Date.now() - 60_000, {
+    message: "startTime must not be in the past",
   });
 
 export const updateBookingSchema = z
@@ -23,9 +26,23 @@ export const updateBookingSchema = z
   .partial()
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one field must be provided",
-  });
+  })
+  .refine(
+    (data) =>
+      data.startTime === undefined ||
+      data.startTime.getTime() >= Date.now() - 60_000,
+    { message: "startTime must not be in the past" },
+  );
 
-export const listBookingsQuerySchema = z.object({
-  from: z.iso.datetime().optional(),
-  to: z.iso.datetime().optional(),
-});
+export const listBookingsQuerySchema = z
+  .object({
+    from: z.iso.datetime().optional(),
+    to: z.iso.datetime().optional(),
+  })
+  .refine(
+    (data) =>
+      data.from === undefined ||
+      data.to === undefined ||
+      new Date(data.from) < new Date(data.to),
+    { message: "from must be before to" },
+  );

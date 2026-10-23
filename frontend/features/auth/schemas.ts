@@ -9,9 +9,12 @@ const emailSchema = z
 const passwordSchema = z
   .string()
   .min(8, "Password must be at least 8 characters")
-  .refine((password) => Buffer.byteLength(password, "utf8") <= 72, {
-    message: "Password must be at most 72 UTF-8 bytes",
-  });
+  .refine(
+    (password) => new TextEncoder().encode(password).length <= 72,
+    {
+      message: "Password must be at most 72 UTF-8 bytes",
+    },
+  );
 
 export const loginSchema = z.object({
   email: emailSchema,

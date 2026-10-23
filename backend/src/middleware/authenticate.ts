@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { prisma } from "../db/index.ts";
 import { appError } from "../utils/app-error.ts";
 import { verifyAccessToken } from "../utils/jwt.ts";
 
@@ -18,6 +19,14 @@ export async function authenticate(
   try {
     userId = await verifyAccessToken(token);
   } catch {
+    throw appError(401, "Invalid or expired token");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+  if (!user) {
     throw appError(401, "Invalid or expired token");
   }
 

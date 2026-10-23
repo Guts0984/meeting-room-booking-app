@@ -18,6 +18,15 @@ export function errorHandler(
     return;
   }
 
+  if (
+    err instanceof SyntaxError &&
+    "status" in err &&
+    (err as { status?: unknown }).status === 400
+  ) {
+    res.status(400).json({ error: "Malformed JSON in request body" });
+    return;
+  }
+
   console.error(err);
   res.status(500).json({ error: "Internal server error" });
 }

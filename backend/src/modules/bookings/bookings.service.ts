@@ -27,13 +27,37 @@ export type ListBookingsFilter = {
   to?: string | undefined;
 };
 
+function isPrismaCode(error: unknown, code: string): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === code
+  );
+}
+
+async function withSerializationRetry<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (isPrismaCode(error, "P2034") && attempt < maxAttempts) {
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 async function assertNoConflict(
+  tx: Prisma.TransactionClient,
   roomId: string,
   startTime: Date,
   endTime: Date,
   excludeBookingId?: string,
 ): Promise<void> {
-  const conflict = await prisma.booking.findFirst({
+  const conflict = await tx.booking.findFirst({
     where: {
       roomId,
       ...(excludeBookingId ? { id: { not: excludeBookingId } } : {}),
@@ -80,21 +104,28 @@ export async function createBooking(
   roomId: string,
   data: CreateBookingInput,
 ) {
-  await assertNoConflict(roomId, data.startTime, data.endTime);
+  return withSerializationRetry(() =>
+    prisma.$transaction(
+      async (tx) => {
+        await assertNoConflict(tx, roomId, data.startTime, data.endTime);
 
-  return prisma.booking.create({
-    data: {
-      roomId,
-      createdById: userId,
-      description: data.description,
-      startTime: data.startTime,
-      endTime: data.endTime,
-      attendees: {
-        create: { userId },
+        return tx.booking.create({
+          data: {
+            roomId,
+            createdById: userId,
+            description: data.description,
+            startTime: data.startTime,
+            endTime: data.endTime,
+            attendees: {
+              create: { userId },
+            },
+          },
+          include: bookingInclude,
+        });
       },
-    },
-    include: bookingInclude,
-  });
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    ),
+  );
 }
 
 export async function listBookings(
@@ -134,14 +165,31 @@ export async function updateBooking(
     if (endTime <= startTime) {
       throw appError(400, "endTime must be after startTime");
     }
-    await assertNoConflict(booking.roomId, startTime, endTime, bookingId);
   }
 
-  return prisma.booking.update({
-    where: { id: bookingId },
-    data,
-    include: bookingInclude,
-  });
+  return withSerializationRetry(() =>
+    prisma.$transaction(
+      async (tx) => {
+        if (data.startTime !== undefined || data.endTime !== undefined) {
+          await assertNoConflict(tx, booking.roomId, startTime, endTime, bookingId);
+        }
+
+        try {
+          return await tx.booking.update({
+            where: { id: bookingId },
+            data,
+            include: bookingInclude,
+          });
+        } catch (error) {
+          if (isPrismaCode(error, "P2025")) {
+            throw appError(404, "Booking not found");
+          }
+          throw error;
+        }
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    ),
+  );
 }
 
 export async function deleteBooking(
@@ -149,7 +197,14 @@ export async function deleteBooking(
   bookingId: string,
 ): Promise<void> {
   await getBookingForAdmin(userId, bookingId);
-  await prisma.booking.delete({ where: { id: bookingId } });
+  try {
+    await prisma.booking.delete({ where: { id: bookingId } });
+  } catch (error) {
+    if (isPrismaCode(error, "P2025")) {
+      throw appError(404, "Booking not found");
+    }
+    throw error;
+  }
 }
 
 export async function joinBooking(userId: string, bookingId: string) {
